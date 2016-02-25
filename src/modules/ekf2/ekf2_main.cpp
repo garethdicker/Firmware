@@ -74,9 +74,9 @@
 #include <uORB/topics/vehicle_global_position.h>
 #include <uORB/topics/estimator_status.h>
 #include <uORB/topics/ekf2_innovations.h>
-#include <uORB/topics/vehicle_control_mode.h>
-#include <uORB/topics/vehicle_status.h>
+#include <uORB/topics/actuator_armed.h>
 #include <uORB/topics/ekf2_replay.h>
+#include <uORB/topics/vehicle_land_detected.h>
 
 #include <ecl/EKF/ekf.h>
 
@@ -133,7 +133,8 @@ private:
 	int		_gps_sub = -1;
 	int		_airspeed_sub = -1;
 	int		_params_sub = -1;
-	int 	_vehicle_status_sub = -1;
+	int		_actuator_armed_sub = -1;
+	int		_vehicle_land_detected_sub = -1;
 
 	bool            _prev_motors_armed = false; // motors armed status from the previous frame
 
@@ -271,7 +272,8 @@ void Ekf2::task_main()
 	_gps_sub = orb_subscribe(ORB_ID(vehicle_gps_position));
 	_airspeed_sub = orb_subscribe(ORB_ID(airspeed));
 	_params_sub = orb_subscribe(ORB_ID(parameter_update));
-	_vehicle_status_sub = orb_subscribe(ORB_ID(vehicle_status));
+	_actuator_armed_sub = orb_subscribe(ORB_ID(actuator_armed));
+	_vehicle_land_detected_sub = orb_subscribe(ORB_ID(vehicle_land_detected));
 
 	px4_pollfd_struct_t fds[2] = {};
 	fds[0].fd = _sensors_sub;
@@ -288,7 +290,7 @@ void Ekf2::task_main()
 	sensor_combined_s sensors = {};
 	vehicle_gps_position_s gps = {};
 	airspeed_s airspeed = {};
-	vehicle_control_mode_s vehicle_control_mode = {};
+	actuator_armed_s actuator_armed = {};
 
 	while (!_task_should_exit) {
 		int ret = px4_poll(fds, sizeof(fds) / sizeof(fds[0]), 1000);
@@ -319,7 +321,8 @@ void Ekf2::task_main()
 
 		bool gps_updated = false;
 		bool airspeed_updated = false;
-		bool vehicle_status_updated = false;
+		bool actuator_armed_updated = false;
+		bool vehicle_land_detected_updated = false;
 
 		orb_copy(ORB_ID(sensor_combined), _sensors_sub, &sensors);
 		// update all other topics if they have new data
@@ -382,14 +385,19 @@ void Ekf2::task_main()
 			_ekf->setAirspeedData(airspeed.timestamp, &airspeed.indicated_airspeed_m_s);
 		}
 
-		// read vehicle status if available for 'landed' information
-		orb_check(_vehicle_status_sub, &vehicle_status_updated);
+		orb_check(_actuator_armed_sub, &actuator_armed_updated);
 
-		if (vehicle_status_updated) {
-			struct vehicle_status_s status = {};
-			orb_copy(ORB_ID(vehicle_status), _vehicle_status_sub, &status);
-			_ekf->set_in_air_status(!status.condition_landed);
-			_ekf->set_arm_status(status.arming_state & vehicle_status_s::ARMING_STATE_ARMED);
+		if (actuator_armed_updated) {
+			orb_copy(ORB_ID(actuator_armed), _actuator_armed_sub, &actuator_armed);
+			_ekf->set_arm_status(&actuator_armed.armed);
+		}
+
+		orb_check(_vehicle_land_detected_sub, &vehicle_land_detected_updated);
+
+		if (vehicle_land_detected_updated) {
+			struct vehicle_land_detected_s vehicle_land_detected = {};
+			orb_copy(ORB_ID(vehicle_land_detected), _vehicle_land_detected_sub, &vehicle_land_detected);
+			_ekf->set_in_air_status(!vehicle_land_detected.landed);
 		}
 
 		// run the EKF update
@@ -573,7 +581,7 @@ void Ekf2::task_main()
 		}
 
 		// save the declination to the EKF2_MAG_DECL parameter when a dis-arm event is detected
-		if ((_params->mag_declination_source & (1 << 1)) && _prev_motors_armed && !vehicle_control_mode.flag_armed) {
+		if ((_params->mag_declination_source & (1 << 1)) && _prev_motors_armed && !actuator_armed.armed) {
 			float decl_deg;
 			_ekf->copy_mag_decl_deg(&decl_deg);
 			_mag_declination_deg->set(decl_deg);
