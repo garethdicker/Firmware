@@ -279,3 +279,6 @@ ORB_DEFINE(ekf2_innovations, struct ekf2_innovations_s);
 
 #include "topics/ekf2_replay.h"
 ORB_DEFINE(ekf2_replay, struct ekf2_replay_s);
+
+#include "topics/commander_state.h"
+ORB_DEFINE(commander_state, struct commander_state_s);
