@@ -1,0 +1,203 @@
+\documentclass[9pt]{article}
+\usepackage{fullpage}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage[usenames]{color}
+\usepackage{hyperref}
+
+\leftmargin=0.25in
+\oddsidemargin=0.25in
+\textwidth=6.0in
+\topmargin=-0.25in
+\textheight=9.25in
+
+\raggedright
+
+\def\bull{\vrule height 0.8ex width .7ex depth -.1ex }
+% DEFINITIONS FOR RESUME
+
+\newenvironment{changemargin}[2]{%
+  \begin{list}{}{%
+    \setlength{\topsep}{0pt}%
+    \setlength{\leftmargin}{#1}%
+    \setlength{\rightmargin}{#2}%
+    \setlength{\listparindent}{\parindent}%
+    \setlength{\itemindent}{\parindent}%
+    \setlength{\parsep}{\parskip}%
+  }%
+  \item[]}{\end{list}
+}
+
+\newcommand{\lineover}{
+	\begin{changemargin}{-0.05in}{-0.05in}
+		\vspace*{-8pt}
+		\hrulefill \\
+		\vspace*{-2pt}
+	\end{changemargin}
+}
+
+\newcommand{\header}[1]{
+	\begin{changemargin}{-0.5in}{-0.5in}
+		\scshape{#1}\\
+  	\lineover
+	\end{changemargin}
+}
+
+\newcommand{\contact}[4]{
+	\begin{changemargin}{-0.5in}{-0.5in}
+		\begin{center}
+			{\Large \scshape {#1}}\\ \smallskip
+			{#2}\\ \smallskip 
+			{#3}\\ \smallskip
+			{#4}\smallskip
+		\end{center}
+	\end{changemargin}
+}
+
+\newenvironment{body} {
+	\vspace*{-16pt}
+	\begin{changemargin}{-0.25in}{-0.5in}
+  }	
+	{\end{changemargin}
+}	
+
+\newcommand{\school}[4]{
+	\textbf{#1} \hfill \emph{#2\\}
+	#3\\ 
+	#4\\
+}
+
+% END RESUME DEFINITIONS
+
+\begin{document}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Name
+\contact{Gareth Dicker}{dicker.gareth@gmail.com}{+(438) 939-9477, \href{https://www.linkedin.com/in/gareth-dicker-46b98774}{\textbf{LinkedIn}}, \href{https://www.facebook.com/gareth.dicker.5}{\textbf{Facebook}}, \href{https://github.com/McGill-AML/Collision}{\textbf{Github}}}{129b Prince-Arthur Est., Montreal, QC, H2X 1B6}
+
+\bigskip
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Experience
+\header{Engineering Research Experience}
+
+\begin{body}
+	\vspace{14pt}
+	\textbf{Aerospace Mechatronics Laboratory}, \emph{McGill University}
+	\vspace*{-4pt}
+	\begin{itemize} \itemsep -0pt  % reduce space between items
+		\item Implemented a biomimetic method for smoothly landing a quadrotor \hfill \emph{Sept 2013 - April 2014}\\
+		
+		\item Designed and manufactured a 3D printed gripping device for a quadrotor \hfill \emph{Sept 2014 - Dec 2014}\\
+		
+		\item Masters thesis on quadrotor collision recovery control \hfill \emph{Jan 2015 - Dec 2016}\\
+		
+		\begin{itemize}
+		    \item Developed MATLAB simulation of global attitude control of a quadrotor with Monte Carlo validation 
+		    \item Supervising the assembly of a custom quadrotor research platform to allow for repeated collisions
+		    \item Porting MATLAB control code to Gazebo simulation and PX4 firmware
+		    \item Performing extensive crash testing under Vicon motion tracking and high speed camera in order to characterize impact conditions/types
+		\end{itemize}
+		
+	\end{itemize}
+\end{body}
+\medskip
+
+\begin{body}
+	\vspace{14pt}
+	\textbf{NCFRN Conference 2014/2015}
+	\vspace*{-4pt}
+	\begin{itemize} \itemsep -0pt  % reduce space between items
+		\item Successfully demonstrated a biomimetic landing controller at the Canadian Space Agency.
+		\item Performed outdoor sensor validation tests on a Spiri quadrotor in Kelowna, BC
+	\end{itemize}
+\end{body}
+\bigskip
+
+% \newpage{} % uncomment this line if you want to force a new page
+
+\header{Engineering Work Experience}
+
+\begin{body}
+	\vspace{14pt}
+
+	\textbf{FIRST Robotics Mentor} \hfill {} \emph{Jan - March 2016}\\
+	Coordinated students and industrial/educational partners to design and manufacture a large robot for the annual international robotics competition \\
+	\medskip
+	\vspace{14pt}
+	\textbf{Pleaides Inc.} \emph{quadrotor start-up company} \hfill \emph{June - Sept 2014}\\
+	\vspace*{-4pt}
+	\begin{itemize} \itemsep -0pt  % reduce space between items
+
+		\item Developed ROS based simulation to demo a quadrotor's functionality to partners and sponsors
+		\item Assisted in development and assembly the quadrotor's electronic and frame components
+		
+	\end{itemize}
+\end{body}
+
+\bigskip
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Skills
+
+\header{Hardware/Software Skills}
+
+\begin{body}
+	\vspace{14pt}
+	\emph{\textbf{Mechanical:}}{} 3D printing, laser cutting, machining, power tools, motors, sensors\\
+	\medskip
+	\emph{\textbf{Electrical:}}{} soldering, battery maintenance, Arduino, Pixhawk, Odroid, serial communications \\
+	\medskip
+	\emph{\textbf{Programming:}}{} C/C++, OpenCV, ROS, Gazebo,  MATLAB, Simulink, Python, \LaTeX, bash, Solidworks\\
+\end{body}
+
+\bigskip
+
+% Education
+\header{Education}
+
+\begin{body}
+	\vspace{14pt}
+	\textbf{B.Eng. Honours Mechanical Engineering --- 3.69/4.0} \hfill \emph{Dec 2014} \\
+	\emph{McGill University}\\
+	\emph \quad Dean's Honour List, Quebec Iron Titanium Scholarship\\
+	\emph {Undergraduate Honours Thesis} supervised by Dr. Inna Sharf\\
+\end{body}
+\medskip
+\begin{body}
+	\vspace{14pt}
+	\textbf{Masters of Mechanical Engineering} \hfill \emph{Jan 2014 - present} \\
+	\emph{McGill University}\\
+	\emph \quad Designing collision recovery control for a quadrotor crashing into a wall\\
+
+\end{body}
+
+\bigskip
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Leadership
+\header{Leadership Activities}
+
+\begin{body}
+	\vspace{14pt}
+	\textbf{Board Member of the Yellow Door}, a Montreal community non-profit \hfill {} \emph{Sept 2013 - present}\\
+	\smallskip
+	\emph{Vice President of the Yellow Door Board} \hfill {} \emph{June 2015 - present}\\
+	\medskip
+	\textbf{Founder of BranchOut @ the Yellow Door} \hfill {} \emph{Sept 2013 - present}\\
+	\medskip
+	\begin{itemize} \itemsep -0pt  % reduce space between items
+
+		\item 	BranchOut is an initiative to promote creativity and well-being in youth 
+		\item Develop, coordinate and advertise a weekly schedule of volunteer workshops 
+    \end{itemize}
+	
+    \medskip
+	\textbf{Freelance Violin Performer/Teacher}, with a focus on classical improvisation \hfill {} \emph{Feb 2013 - present}\\
+
+\end{body}
+
+\smallskip
+
+
+\end{document}
