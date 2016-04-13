@@ -45,6 +45,10 @@
 
 #include <drivers/drv_orb_dev.h>
 
+//added
+#include "topics/quaternion.h"
+ORB_DEFINE(quaternion, struct quaternion_s);
+
 #include "topics/sensor_mag.h"
 ORB_DEFINE(sensor_mag, struct sensor_mag_s);
 

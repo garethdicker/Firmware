@@ -62,6 +62,8 @@ set(config_module_list
 	lib/runway_takeoff
 	lib/tailsitter_recovery
 	examples/px4_simple_app
+	examples/px4_mavlink_debug
+	modules/recovery
 	)
 
 set(config_extra_builtin_cmds

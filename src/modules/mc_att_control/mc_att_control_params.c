@@ -276,7 +276,7 @@ PARAM_DEFINE_FLOAT(MC_YAW_FF, 0.5f);
  * @increment 5
  * @group Multicopter Attitude Control
  */
-PARAM_DEFINE_FLOAT(MC_ROLLRATE_MAX, 220.0f);
+PARAM_DEFINE_FLOAT(MC_ROLLRATE_MAX, 360.0f);
 
 /**
  * Max pitch rate
@@ -290,7 +290,7 @@ PARAM_DEFINE_FLOAT(MC_ROLLRATE_MAX, 220.0f);
  * @increment 5
  * @group Multicopter Attitude Control
  */
-PARAM_DEFINE_FLOAT(MC_PITCHRATE_MAX, 220.0f);
+PARAM_DEFINE_FLOAT(MC_PITCHRATE_MAX, 360.0f);
 
 /**
  * Max yaw rate

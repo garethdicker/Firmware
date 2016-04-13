@@ -47,29 +47,32 @@
 
 #include <uORB/uORB.h>
 #include <uORB/topics/debug_key_value.h>
+#include <mc_att_control/debug.h>
 
 __EXPORT int px4_mavlink_debug_main(int argc, char *argv[]);
+
+float alpha;
 
 int px4_mavlink_debug_main(int argc, char *argv[])
 {
 	printf("Hello Debug!\n");
 
 	/* advertise debug value */
-	struct debug_key_value_s dbg = { .key = "velx", .value = 0.0f };
+	struct debug_key_value_s dbg = { .key = "alpha", .value = 0.0f };
+
 	orb_advert_t pub_dbg = orb_advertise(ORB_ID(debug_key_value), &dbg);
 
-	int value_counter = 0;
-
-	while (value_counter < 100) {
+	int n = 1;
+	while(n < 50){
 		/* send one value */
-		dbg.value = value_counter;
+		dbg.value = alpha;
+
 		orb_publish(ORB_ID(debug_key_value), pub_dbg, &dbg);
 
-		warnx("sent one more value..");
-
-		value_counter++;
-		usleep(500000);
+		//printf("%f\n",(double)alpha);
+		n++;
+		//value_counter++;
+		usleep(100000);
 	}
-
 	return 0;
 }
