@@ -78,6 +78,9 @@
 #include <uORB/topics/vehicle_status.h>
 #include <uORB/topics/ekf2_replay.h>
 
+#include <uORB/topics/quaternion.h>
+#include <uORB/topics/vehicle_command.h>
+
 #include <ecl/EKF/ekf.h>
 
 
@@ -134,6 +137,7 @@ private:
 	int		_airspeed_sub = -1;
 	int		_params_sub = -1;
 	int 	_vehicle_status_sub = -1;
+	int 	_vehicle_command_sub = -1;
 
 	bool            _prev_motors_armed = false; // motors armed status from the previous frame
 
@@ -144,6 +148,8 @@ private:
 	orb_advert_t _estimator_status_pub;
 	orb_advert_t _estimator_innovations_pub;
 	orb_advert_t _replay_pub;
+
+	orb_advert_t _quaternion_pub;
 
 	/* Low pass filter for attitude rates */
 	math::LowPassFilter2p _lp_roll_rate;
@@ -272,6 +278,7 @@ void Ekf2::task_main()
 	_airspeed_sub = orb_subscribe(ORB_ID(airspeed));
 	_params_sub = orb_subscribe(ORB_ID(parameter_update));
 	_vehicle_status_sub = orb_subscribe(ORB_ID(vehicle_status));
+	_vehicle_command_sub = orb_subscribe(ORB_ID(vehicle_command));
 
 	px4_pollfd_struct_t fds[2] = {};
 	fds[0].fd = _sensors_sub;
@@ -290,7 +297,26 @@ void Ekf2::task_main()
 	airspeed_s airspeed = {};
 	vehicle_control_mode_s vehicle_control_mode = {};
 
+	struct vehicle_command_s _cmd;
+	struct quaternion_s _quaternion;
+	memset(&_quaternion, 0, sizeof(_quaternion));
+	memset(&_cmd, 0, sizeof(_cmd));
+
+	_quaternion_pub = orb_advertise(ORB_ID(quaternion), &_quaternion);
+	
+
+
 	while (!_task_should_exit) {
+
+		orb_copy(ORB_ID(vehicle_command), _vehicle_command_sub, &_cmd);
+
+		_quaternion.q[0] = _cmd.param1;
+		_quaternion.q[1] = _cmd.param2;
+		_quaternion.q[2] = _cmd.param3;
+		_quaternion.q[3] = _cmd.param4;
+
+		orb_publish(ORB_ID(quaternion), _quaternion_pub, &_quaternion);
+
 		int ret = px4_poll(fds, sizeof(fds) / sizeof(fds[0]), 1000);
 
 		if (ret < 0) {

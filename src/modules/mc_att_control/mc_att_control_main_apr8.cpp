@@ -671,7 +671,7 @@ MulticopterAttitudeControl::control_attitude(float dt)
 	R_sp.set(_v_att_sp.R_body);
 
 	/* get current rotation matrix from control state quaternions */
-	math::Quaternion q_att(_ctrl_state.q[0], _ctrl_state.q[1], _ctrl_state.q[2], _ctrl_state.q[3]);
+	math::Quaternion q_att(_quaternion.q[0],_quaternion.q[1], _quaternion.q[2], _quaternion.q[3]);
 	math::Matrix<3, 3> R = q_att.to_dcm();
 
 	/* all input data is ready, run controller itself */
@@ -843,6 +843,7 @@ MulticopterAttitudeControl::task_main()
 	fds[0].fd = _ctrl_state_sub;
 	fds[0].events = POLLIN;
 
+	//added
 	_quaternion_pub = orb_advertise(ORB_ID(quaternion), &_quaternion);
 
 	while (!_task_should_exit) {

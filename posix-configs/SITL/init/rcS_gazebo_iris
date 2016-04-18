@@ -57,8 +57,9 @@ mavlink stream -r 80 -s LOCAL_POSITION_NED -u 14556
 mavlink stream -r 80 -s LOCAL_POSITION -u 14556
 mavlink stream -r 80 -s GLOBAL_POSITION_INT -u 14556
 mavlink stream -r 80 -s ATTITUDE -u 14556
-mavlink stream -r 80 -s ATTITUDE_QUATERNION -u 14556
-mavlink stream -r 80 -s CONTROL_SYSTEM_STATE -u 14556
+mavlink stream -r 200 -s ATTITUDE_QUATERNION -u 14556
+mavlink stream -r 80 -s QUATERNION -u 14556
+mavlink stream -r 80 -s VEHICLE_COMMAND -u 14556
 mavlink stream -r 80 -s ATTITUDE_TARGET -u 14556
 mavlink stream -r 20 -s RC_CHANNELS -u 14556
 mavlink stream -r 250 -s HIGHRES_IMU -u 14556

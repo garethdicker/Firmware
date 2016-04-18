@@ -82,6 +82,9 @@
 #include <uORB/topics/parameter_update.h>
 #include <uORB/topics/multirotor_motor_limits.h>
 #include <uORB/topics/mc_att_ctrl_status.h>
+
+#include <uORB/topics/quaternion.h>
+
 #include <systemlib/param/param.h>
 #include <systemlib/err.h>
 #include <systemlib/perf_counter.h>
@@ -139,6 +142,8 @@ private:
 	int		_vehicle_status_sub;	/**< vehicle status subscription */
 	int 	_motor_limits_sub;		/**< motor limits subscription */
 
+	int 	_quaternion_sub;
+
 	orb_advert_t	_v_rates_sp_pub;		/**< rate setpoint publication */
 	orb_advert_t	_actuators_0_pub;		/**< attitude actuator controls publication */
 	orb_advert_t	_controller_status_pub;	/**< controller status publication */
@@ -158,6 +163,8 @@ private:
 	struct vehicle_status_s				_vehicle_status;	/**< vehicle status */
 	struct multirotor_motor_limits_s	_motor_limits;		/**< motor limits */
 	struct mc_att_ctrl_status_s 		_controller_status; /**< controller status */
+
+	struct quaternion_s 				_quaternion;
 
 	perf_counter_t	_loop_perf;			/**< loop performance counter */
 	perf_counter_t	_controller_latency_perf;
@@ -340,6 +347,9 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 	memset(&_vehicle_status, 0, sizeof(_vehicle_status));
 	memset(&_motor_limits, 0, sizeof(_motor_limits));
 	memset(&_controller_status, 0, sizeof(_controller_status));
+
+	memset(&_quaternion, 0, sizeof(_quaternion));
+
 	_vehicle_status.is_rotary_wing = true;
 
 	_params.att_p.zero();
@@ -650,197 +660,75 @@ MulticopterAttitudeControl::control_attitude(float dt)
 {
 	vehicle_attitude_setpoint_poll();
 
-//EDIT 
-	//TODO: implement MATLAB CODE
+	//desired acceleration, world frame
+	math::Vector<3> a_des(0.0f, 0.0f, 18.0f);
 
-								/*
-								global m Ixx Iyy Izz u2RpmMat;
+	//get desired body z axis in world frame, just normalize, so it's [0 0 1]
+	math::Vector<3> bodyZDesired = a_des.normalized();
 
-							if sum(Control.acc) == 0
-							    error('Desired acceleration is non-zero');
-							end
+	//compute attitude quaternion, do we know w x y z or x y z w ?
+	math::Quaternion q_att(_quaternion.q[0], _quaternion.q[1], _quaternion.q[2], _quaternion.q[3]);
 
-							%% 1. Compute thrust
+	// appended a zero to beginning for quaternion multiplication
+	math::Quaternion zAxisAppended(0.0f, 0.0f, 0.0f, 1.0f);
 
-							% compute body z-axis direction, -1 because quad z-axis points down
-							bodyFrameZAxis = quatrotate(Pose.attQuat', [0 0 -1]);
+	// rotate z axis into world frame using quaternion multiplication
+	math::Quaternion bodyZAppended = ((q_att * zAxisAppended) * q_att.inversed());
+	//compute body z axis in world frame
+	math::Vector<3> bodyZ(bodyZAppended(1), bodyZAppended(2), bodyZAppended(3));
 
-							% if the desired acceleration and body frame z-axis point at all in the
-							% same direction, then set thrust equal to their dot product times mass
-							% Note: negative sign because z-axis points opposite of thrust
+	float togetherness = bodyZ(0)*bodyZDesired(0) + bodyZ(1)*bodyZDesired(1) + bodyZ(2)*bodyZDesired(2);	
+	
+	// dot product
+	float c_des = a_des(0)*bodyZ(0) + a_des(1)*bodyZ(1) + a_des(2)*bodyZ(2);
+	_thrust_sp = c_des;
 
-							if dot(Control.acc,bodyFrameZAxis) > 0
-							    Control.u(1) = -m*dot(Control.acc, bodyFrameZAxis);
-							else
-							    % can't give thrust in positive z-axis
-							    Control.u(1) = 0;
-							end
+	// thrust in auto is limited to 0.95 max, gives about 1g against gravity
+	_thrust_sp = 0.5f * c_des / 9.81f;
 
-							% ----------> Saturate thrust here <-----------
+	//alpha ranges between 0 and pi, and can't be negative
+	float alpha = acosf(togetherness);
 
-							%% 2. Compute roll/pitch error
+	//cross product
+    math::Vector<3> n(bodyZ(1)*bodyZDesired(2) - bodyZ(2)*bodyZDesired(1), \
+				      bodyZ(2)*bodyZDesired(0) - bodyZ(0)*bodyZDesired(2), \
+				      bodyZ(0)*bodyZDesired(1) - bodyZ(1)*bodyZDesired(0));
+    n.normalize();
+	
+    math::Quaternion nAppended(0.0f, n(0), n(1), n(2));
+	math::Quaternion nBodyAppended = ((q_att.inversed() * nAppended) * q_att);
+	math::Vector<3>  nBody(nBodyAppended(1), nBodyAppended(2),nBodyAppended(3));
 
-							% compute desired body frame z-axis
-							if sum(Control.acc ~= 0)
-							    bodyFrameZAxisDesired = Control.acc / norm(Control.acc);
-							else
-							    % free fall 
-							    bodyFrameZAxisDesired = [0; 0; 0];
-							end
+    math::Quaternion q_error_rp(cosf(alpha/2), nBody(0)*sinf(alpha/2), \
+    							nBody(1)*sinf(alpha/2), nBody(2)*sinf(alpha/2));
 
-							% compute angle between actual and desired body frame z axis
-							theta = acos(dot(bodyFrameZAxis, bodyFrameZAxisDesired));
+	const float ERROR_TO_BODYRATES = 20.0f; 
 
-							if theta == 0 
-							    % set the error quaternion to the identity in body frame
-							    Control.errQuat = [1 0 0 0]';
-							else
-							    % compute the world frame normal 
-							    n = cross(bodyFrameZAxis, bodyFrameZAxisDesired);
-							    % to truncate any rounding error, normalize 
-							    n = n/norm(n);
-							    % rotate into body frame
-							    nBody = quatrotate(quatinv(Pose.attQuat)',n);
-							    % compute desired quaternion
-							    Control.errQuat = real([cos(theta/2)         ; nBody(1)*sin(theta/2); ...
-							                       nBody(2)*sin(theta/2); nBody(3)*sin(theta/2)]);
-							end
+	float body_p_des = ERROR_TO_BODYRATES * q_error_rp(1);
 
-							%% 3. Compute desired body rates 
+	//is the negative 1 here needed due to orientation conventions? we are in NED here
+	float body_q_des = -1* ERROR_TO_BODYRATES * q_error_rp(2);
 
-							% compute first two desired body rates (p and q) by scaling error
-							% quaternion terms q1 and q2
-							ERROR_TO_DESIRED_BODYRATES = 20;    %this is p_{rp} of Faessler's control
-							Control.twist.angVel(1:2) = ERROR_TO_DESIRED_BODYRATES*Control.errQuat(2:3);
+	double x = (double)alpha;
+	double y = (double)togetherness;
+	double z = (double)_thrust_sp;
 
-							% if the error is negative, make the desired body rates negative
-							if Control.errQuat(1) < 0
-							    Control.twist.angVel(1:2) = -Control.twist.angVel(1:2);
-							end
+	printf("quaternion is %f   %f  %f  \n", x, y, z);
 
-							% set thired desired body rate (r) always go to zero
-							Control.twist.angVel(3) = 0;
+//check if yawed to other side
 
-							%% Perform PD control on actual and desired body rates
-							    
-							% define gains
-							propPQ  = 20.0; % proportional for p and q
-							propR   = 2.0;  % proportional only for r
+	if (q_error_rp(0) < 0.0f){
+    	body_p_des = -1*body_p_des;
+    	body_q_des = -1*body_q_des;
+    }
 
-							% compute desired boy frame accelerations with P control on the body rates
-							vP = propPQ*(Control.twist.angVel(1) - Twist.angVel(1));
-							vQ = propPQ*(Control.twist.angVel(2) - Twist.angVel(2));
-							vR = propR *(Control.twist.angVel(3) - Twist.angVel(3)); 
-	*/
+	//body_p_des = 0.0f;
+	//body_q_des = 1.0f;
+	float body_r_des = 0.0f;
 
-	_thrust_sp = _v_att_sp.thrust;
+	math::Vector<3> rates(body_p_des, body_q_des, body_r_des);
 
-	/* construct attitude setpoint rotation matrix */
-	math::Matrix<3, 3> R_sp;
-	R_sp.set(_v_att_sp.R_body);
-
-	/* get current rotation matrix from control state quaternions */
-	math::Quaternion q_att(_ctrl_state.q[0], _ctrl_state.q[1], _ctrl_state.q[2], _ctrl_state.q[3]);
-	math::Matrix<3, 3> R = q_att.to_dcm();
-
-	/* all input data is ready, run controller itself */
-
-	/* try to move thrust vector shortest way, because yaw response is slower than roll/pitch */
-	math::Vector<3> R_z(R(0, 2), R(1, 2), R(2, 2));
-	math::Vector<3> R_sp_z(R_sp(0, 2), R_sp(1, 2), R_sp(2, 2));
-
-	/* axis and sin(angle) of desired rotation */
-	math::Vector<3> e_R = R.transposed() * (R_z % R_sp_z);
-
-	/* calculate angle error */
-	float e_R_z_sin = e_R.length();
-	float e_R_z_cos = R_z * R_sp_z;
-
-	/* calculate weight for yaw control */
-	float yaw_w = R_sp(2, 2) * R_sp(2, 2);
-
-	/* calculate rotation matrix after roll/pitch only rotation */
-	math::Matrix<3, 3> R_rp;
-
-	if (e_R_z_sin > 0.0f) {
-		/* get axis-angle representation */
-		float e_R_z_angle = atan2f(e_R_z_sin, e_R_z_cos);
-		math::Vector<3> e_R_z_axis = e_R / e_R_z_sin;
-
-		e_R = e_R_z_axis * e_R_z_angle;
-
-		/* cross product matrix for e_R_axis */
-		math::Matrix<3, 3> e_R_cp;
-		e_R_cp.zero();
-		e_R_cp(0, 1) = -e_R_z_axis(2);
-		e_R_cp(0, 2) = e_R_z_axis(1);
-		e_R_cp(1, 0) = e_R_z_axis(2);
-		e_R_cp(1, 2) = -e_R_z_axis(0);
-		e_R_cp(2, 0) = -e_R_z_axis(1);
-		e_R_cp(2, 1) = e_R_z_axis(0);
-
-		/* rotation matrix for roll/pitch only rotation */
-		R_rp = R * (_I + e_R_cp * e_R_z_sin + e_R_cp * e_R_cp * (1.0f - e_R_z_cos));
-
-	} else {
-		/* zero roll/pitch rotation */
-		R_rp = R;
-	}
-
-	/* R_rp and R_sp has the same Z axis, calculate yaw error */
-	math::Vector<3> R_sp_x(R_sp(0, 0), R_sp(1, 0), R_sp(2, 0));
-	math::Vector<3> R_rp_x(R_rp(0, 0), R_rp(1, 0), R_rp(2, 0));
-	e_R(2) = atan2f((R_rp_x % R_sp_x) * R_sp_z, R_rp_x * R_sp_x) * yaw_w;
-
-	if (e_R_z_cos < 0.0f) {
-		/* for large thrust vector rotations use another rotation method:
-		 * calculate angle and axis for R -> R_sp rotation directly */
-		math::Quaternion q;
-		q.from_dcm(R.transposed() * R_sp);
-		math::Vector<3> e_R_d = q.imag();
-		e_R_d.normalize();
-		e_R_d *= 2.0f * atan2f(e_R_d.length(), q(0));
-
-		/* use fusion of Z axis based rotation and direct rotation */
-		float direct_w = e_R_z_cos * e_R_z_cos * yaw_w;
-		e_R = e_R * (1.0f - direct_w) + e_R_d * direct_w;
-	}
-//EDIT
-//	e_R(1) = 0.0f;
-//	e_R(2) = 0.0f;
-//	e_R(3) = 1.0f;
-
-	/* calculate angular rates setpoint */
-	_rates_sp = _params.att_p.emult(e_R);
-	//_rates_sp = (1.0f 1.0f 1.0f);
-
-	/* limit rates */
-	for (int i = 0; i < 3; i++) {
-		if (_v_control_mode.flag_control_velocity_enabled && !_v_control_mode.flag_control_manual_enabled) {
-			_rates_sp(i) = math::constrain(_rates_sp(i), -_params.auto_rate_max(i), _params.auto_rate_max(i));
-		} else {
-			_rates_sp(i) = math::constrain(_rates_sp(i), -_params.mc_rate_max(i), _params.mc_rate_max(i));
-		}
-	}
-
-	/* weather-vane mode, dampen yaw rate */
-	if (_v_att_sp.disable_mc_yaw_control == true && _v_control_mode.flag_control_velocity_enabled && !_v_control_mode.flag_control_manual_enabled) {
-		float wv_yaw_rate_max = _params.auto_rate_max(2) * _params.vtol_wv_yaw_rate_scale;
-		_rates_sp(2) = math::constrain(_rates_sp(2), -wv_yaw_rate_max, wv_yaw_rate_max);
-		// prevent integrator winding up in weathervane mode
-		_rates_int(2) = 0.0f;
-	}
-
-	/* feed forward yaw setpoint rate */
-	_rates_sp(2) += _v_att_sp.yaw_sp_move_rate * yaw_w * _params.yaw_ff;
-
-	/* weather-vane mode, scale down yaw rate */
-	if (_v_att_sp.disable_mc_yaw_control == true && _v_control_mode.flag_control_velocity_enabled && !_v_control_mode.flag_control_manual_enabled) {
-		float wv_yaw_rate_max = _params.auto_rate_max(2) * _params.vtol_wv_yaw_rate_scale;
-		_rates_sp(2) = math::constrain(_rates_sp(2), -wv_yaw_rate_max, wv_yaw_rate_max);
-		// prevent integrator winding up in weathervane mode
-		_rates_int(2) = 0.0f;
-	}
+	_rates_sp = rates;
 
 }
 
@@ -863,29 +751,17 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 	rates(1) = _ctrl_state.pitch_rate;
 	rates(2) = _ctrl_state.yaw_rate;
 
-// EDIT
-	//TODO: make this only PD control based on MATLAB 
-	
 	/* angular rates error */
 	math::Vector<3> rates_err = _rates_sp - rates;
-	_att_control = _params.rate_p.emult(rates_err) + _params.rate_d.emult(_rates_prev - rates) / dt + _rates_int +
-		       _params.rate_ff.emult(_rates_sp - _rates_sp_prev) / dt;
+	// 0.4 0.4 0.1 is STABLE!!!!!
+	//math::Vector<3> proportional(0.5f, 0.5f, 0.1f);
+
+	//_att_control = proportional.emult(rates_err);
+
+	_att_control = _params.rate_p.emult(rates_err) + _params.rate_d.emult(_rates_prev - rates) / dt;
+
 	_rates_sp_prev = _rates_sp;
 	_rates_prev = rates;
-
-	/* update integral only if not saturated on low limit and if motor commands are not saturated */
-	if (_thrust_sp > MIN_TAKEOFF_THRUST && !_motor_limits.lower_limit && !_motor_limits.upper_limit) {
-		for (int i = 0; i < 3; i++) {
-			if (fabsf(_att_control(i)) < _thrust_sp) {
-				float rate_i = _rates_int(i) + _params.rate_i(i) * rates_err(i) * dt;
-
-				if (PX4_ISFINITE(rate_i) && rate_i > -RATES_I_LIMIT && rate_i < RATES_I_LIMIT &&
-				    _att_control(i) > -RATES_I_LIMIT && _att_control(i) < RATES_I_LIMIT) {
-					_rates_int(i) = rate_i;
-				}
-			}
-		}
-	}
 }
 
 void
@@ -911,6 +787,8 @@ MulticopterAttitudeControl::task_main()
 	_vehicle_status_sub = orb_subscribe(ORB_ID(vehicle_status));
 	_motor_limits_sub = orb_subscribe(ORB_ID(multirotor_motor_limits));
 
+	_quaternion_sub = orb_subscribe(ORB_ID(quaternion));
+
 	/* initialize parameters cache */
 	parameters_update();
 
@@ -922,6 +800,16 @@ MulticopterAttitudeControl::task_main()
 
 	while (!_task_should_exit) {
 
+		orb_copy(ORB_ID(quaternion), _quaternion_sub, &_quaternion);
+/*
+		double q0 = (double)_quaternion.q[0];
+		double q1 = (double)_quaternion.q[1];
+		double q2 = (double)_quaternion.q[2];
+		double q3 = (double)_quaternion.q[3];
+
+		printf("uORB: %f   %f    %f   %f\n", q0, q1, q2, q3);
+
+*/
 		/* wait for up to 100ms for data */
 		int pret = px4_poll(&fds[0], (sizeof(fds) / sizeof(fds[0])), 100);
 

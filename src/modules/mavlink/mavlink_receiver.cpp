@@ -228,6 +228,10 @@ MavlinkReceiver::handle_message(mavlink_message_t *msg)
 		handle_message_distance_sensor(msg);
 		break;
 
+	case MAVLINK_MSG_ID_QUATERNION:
+		handle_message_quaternion(msg);
+		break;
+
 	default:
 		break;
 	}
@@ -301,6 +305,27 @@ MavlinkReceiver::evaluate_target_ok(int command, int target_system, int target_c
 }
 
 void
+MavlinkReceiver::handle_message_quaternion(mavlink_message_t *msg)
+{
+	mavlink_quaternion_t _q;
+	mavlink_msg_quaternion_decode(msg, &_q);
+
+	struct quaternion_s _quaternion;
+	memset(&_quaternion, 0, sizeof(_quaternion));
+
+	_quaternion.q[0] = _q.q0;
+	_quaternion.q[0] = _q.q0;
+	_quaternion.q[0] = _q.q0;
+	_quaternion.q[0] = _q.q0;
+
+	if(_quaternion_pub != nullptr) {
+		_quaternion_pub = orb_advertise(ORB_ID(quaternion), &_quaternion);
+	} else {
+		orb_publish(ORB_ID(quaternion), _quaternion_pub, &_quaternion);
+	}
+}
+
+void
 MavlinkReceiver::handle_message_command_long(mavlink_message_t *msg)
 {
 	/* command */
@@ -325,8 +350,8 @@ MavlinkReceiver::handle_message_command_long(mavlink_message_t *msg)
 
 		} else if (cmd_mavlink.command == MAV_CMD_GET_HOME_POSITION) {
 			_mavlink->configure_stream_threadsafe("HOME_POSITION", 0.5f);
-
-		} else {
+		} 
+		 else {
 
 			if (msg->sysid == mavlink_system.sysid && msg->compid == mavlink_system.compid) {
 				warnx("ignoring CMD with same SYS/COMP (%d/%d) ID",

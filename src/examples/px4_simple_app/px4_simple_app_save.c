@@ -56,20 +56,63 @@ __EXPORT int px4_simple_app_main(int argc, char *argv[]);
 
 int px4_simple_app_main(int argc, char *argv[])
 {
-	struct quaternion_s _q;
-	memset(&_q, 0, sizeof(_q));
-	int quaternion_sub = orb_subscribe(ORB_ID(quaternion));
+	PX4_INFO("Publishing quaternion to QGC plot");
 
-	for (int i = 0; i < 100; i++){
-		orb_copy(ORB_ID(quaternion), quaternion_sub, &_q);
+	/* subscribe to sensor_combined topic */
+	int sensor_sub_fd = orb_subscribe(ORB_ID(control_state));
+	orb_set_interval(sensor_sub_fd, 100);
 
-		PX4_INFO("q:\t%8.4f\t%8.4f\t%8.4f\t%8.4f",
-				 (double)_q.q[0],
-				 (double)_q.q[1],
-				 (double)_q.q[2],
-				 (double)_q.q[3]);
+	/* advertise attitude topic */
+	struct control_state_s state;
+	memset(&state, 0, sizeof(state));
+	orb_advert_t state_pub = orb_advertise(ORB_ID(control_state), &state);
 
-		usleep(100000);	
+	/* one could wait for multiple topics with this technique, just using one here */
+	px4_pollfd_struct_t fds[] = {
+		{ .fd = sensor_sub_fd,   .events = POLLIN },
+	};
+
+	int error_counter = 0;
+
+	for (int i = 0; i < 100; i++) {
+		/* wait for sensor update of 1 file descriptor for 1000 ms (1 second) */
+		int poll_ret = px4_poll(fds, 1, 1000);
+
+		/* handle the poll result */
+		if (poll_ret == 0) {
+			/* this means none of our providers is giving us data */
+			PX4_ERR("[px4_simple_app] Got no data within a second");
+
+		} else if (poll_ret < 0) {
+			/* this is seriously bad - should be an emergency */
+			if (error_counter < 10 || error_counter % 50 == 0) {
+				/* use a counter to prevent flooding (and slowing us down) */
+				PX4_ERR("[px4_simple_app] ERROR return value from poll(): %d"
+					, poll_ret);
+			}
+
+			error_counter++;
+
+		} else {
+
+			if (fds[0].revents & POLLIN) {
+				/* obtained data for the first file descriptor */
+				/* copy sensors raw data into local buffer */
+				orb_copy(ORB_ID(control_state), sensor_sub_fd, &state);
+				PX4_INFO("q:\t%8.4f\t%8.4f\t%8.4f\t%8.4f",
+					 (double)state.q[0],
+					 (double)state.q[1],
+					 (double)state.q[2],
+					 (double)state.q[3]);
+
+				/* set att and publish this information for other apps */
+				orb_publish(ORB_ID(control_state), state_pub, &state);
+			}
+
+			/* there could be more file descriptors here, in the form like:
+			 * if (fds[1..n].revents & POLLIN) {}
+			 */
+		}
 	}
 
 	PX4_INFO("exiting");

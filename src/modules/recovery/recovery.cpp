@@ -7,29 +7,29 @@
 #include <string.h>
 
 #include <uORB/uORB.h>
-#include <uORB/topics/sensor_combined.h>
 #include <uORB/topics/vehicle_attitude.h>
+#include <uORB/topics/quaternion.h>
 
 extern "C" __EXPORT int recovery_main(int argc, char *argv[]);
 
+
 int recovery_main(int argc, char *argv[])
 {
-    PX4_INFO("Hello Sky!");
-
     /* advertise attitude topic */
-    struct vehicle_attitude_s att;
-    memset(&att, 0, sizeof(att));
-    orb_advert_t att_pub = orb_advertise(ORB_ID(vehicle_attitude), &att);
+    struct quaternion_s _quaternion;
+    memset(&_quaternion, 0, sizeof(_quaternion));
+    _quaternion.q[0] = 1.0f;
+    orb_advert_t quaterion_pub = orb_advertise(ORB_ID(quaternion), &_quaternion);
 
     while(true){
 
-        /*PX4_INFO("Quaternion:\t%8.4f\t%8.4f\t%8.4f\t%8.4f\n",
-               (double)att.q[0],
-               (double)att.q[1],
-               (double)att.q[2],
-               (double)att.q[3]);*/
+       /* PX4_INFO("Quaternion:\t%8.4f\t%8.4f\t%8.4f\t%8.4f\n",
+               (double)_quaternion.q[0],
+               (double)_quaternion.q[1],
+               (double)_quaternion.q[2],
+               (double)_quaternion.q[3]);*/
 
-        orb_publish(ORB_ID(vehicle_attitude), att_pub, &att);
+        orb_publish(ORB_ID(quaternion), quaterion_pub, &_quaternion);
     }
 
     PX4_INFO("exiting");
