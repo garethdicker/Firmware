@@ -660,47 +660,47 @@ MulticopterAttitudeControl::control_attitude(float dt)
 {
 	vehicle_attitude_setpoint_poll();
 
-	//desired acceleration, world frame
-	math::Vector<3> a_des(0.0f, 0.0f, 18.0f);
+	float z_vel_sp = 0.0f;
+	float z_vel = _ctrl_state.z_vel;
 
-	//get desired body z axis in world frame, just normalize, so it's [0 0 1]
-	math::Vector<3> bodyZDesired = a_des.normalized();
+	float vert_vel_err = z_vel_sp - z_vel;
 
-	//compute attitude quaternion, do we know w x y z or x y z w ?
+	float vert_vel_p_gain = 5.0f;
+
+	//inputs to control
+	math::Vector<3> a_des(0.0f, 0.0f, 9.81f);
+
+	// euqation (10)
 	math::Quaternion q_att(_quaternion.q[0], _quaternion.q[1], _quaternion.q[2], _quaternion.q[3]);
-
-	// appended a zero to beginning for quaternion multiplication
 	math::Quaternion zAxisAppended(0.0f, 0.0f, 0.0f, 1.0f);
-
-	// rotate z axis into world frame using quaternion multiplication
 	math::Quaternion bodyZAppended = ((q_att * zAxisAppended) * q_att.inversed());
-	//compute body z axis in world frame
 	math::Vector<3> bodyZ(bodyZAppended(1), bodyZAppended(2), bodyZAppended(3));
 
-	float togetherness = bodyZ(0)*bodyZDesired(0) + bodyZ(1)*bodyZDesired(1) + bodyZ(2)*bodyZDesired(2);	
-	
-	// dot product
-	float c_des = a_des(0)*bodyZ(0) + a_des(1)*bodyZ(1) + a_des(2)*bodyZ(2);
-	_thrust_sp = c_des;
+	math::Vector<3> bodyZDesired = a_des.normalized();
 
-	// thrust in auto is limited to 0.95 max, gives about 1g against gravity
-	_thrust_sp = 0.5f * c_des / 9.81f;
+	// equation (9)
+	float c_des = bodyZ(0)*a_des(0) + bodyZ(1)*a_des(1) + bodyZ(2)*a_des(2);	
+	_thrust_sp = (c_des + 9.81f) / (4.0f*9.81f);
+	_thrust_sp = 0.5f + vert_vel_p_gain * vert_vel_err;
+	// equation (11)
+	float alpha = acosf(bodyZ(0)*bodyZDesired(0) + bodyZ(1)*bodyZDesired(1) + bodyZ(2)*bodyZDesired(2));	
 
-	//alpha ranges between 0 and pi, and can't be negative
-	float alpha = acosf(togetherness);
-
-	//cross product
+	//compute axis of rotation in world frame
     math::Vector<3> n(bodyZ(1)*bodyZDesired(2) - bodyZ(2)*bodyZDesired(1), \
 				      bodyZ(2)*bodyZDesired(0) - bodyZ(0)*bodyZDesired(2), \
 				      bodyZ(0)*bodyZDesired(1) - bodyZ(1)*bodyZDesired(0));
+    //to be safe
     n.normalize();
-	
-    math::Quaternion nAppended(0.0f, n(0), n(1), n(2));
-	math::Quaternion nBodyAppended = ((q_att.inversed() * nAppended) * q_att);
-	math::Vector<3>  nBody(nBodyAppended(1), nBodyAppended(2),nBodyAppended(3));
 
-    math::Quaternion q_error_rp(cosf(alpha/2), nBody(0)*sinf(alpha/2), \
+    //rotate into body frame
+    math::Quaternion nAppended(0.0f, n(0), n(1), n(2));
+    math::Quaternion nBodyAppended = ((q_att.inversed() * nAppended) * q_att);
+    math::Vector<3>  nBody(nBodyAppended(1), nBodyAppended(2),nBodyAppended(3));
+
+    // compute roll pitch error quaternion
+	math::Quaternion q_error_rp(cosf(alpha/2), nBody(0)*sinf(alpha/2), \
     							nBody(1)*sinf(alpha/2), nBody(2)*sinf(alpha/2));
+
 
 	const float ERROR_TO_BODYRATES = 20.0f; 
 
@@ -709,21 +709,18 @@ MulticopterAttitudeControl::control_attitude(float dt)
 	//is the negative 1 here needed due to orientation conventions? we are in NED here
 	float body_q_des = -1* ERROR_TO_BODYRATES * q_error_rp(2);
 
-	double x = (double)alpha;
-	double y = (double)togetherness;
+	double x = (double)z_vel;
+	double y = (double)vert_vel_err;
 	double z = (double)_thrust_sp;
 
 	printf("quaternion is %f   %f  %f  \n", x, y, z);
 
 //check if yawed to other side
-
 	if (q_error_rp(0) < 0.0f){
     	body_p_des = -1*body_p_des;
     	body_q_des = -1*body_q_des;
     }
 
-	//body_p_des = 0.0f;
-	//body_q_des = 1.0f;
 	float body_r_des = 0.0f;
 
 	math::Vector<3> rates(body_p_des, body_q_des, body_r_des);

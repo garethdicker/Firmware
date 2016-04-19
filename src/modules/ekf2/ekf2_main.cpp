@@ -498,6 +498,10 @@ void Ekf2::task_main()
 		ctrl_state.q[2] = q(2);
 		ctrl_state.q[3] = q(3);
 
+		ctrl_state.x_vel = _cmd.param5;
+		ctrl_state.y_vel = _cmd.param6;
+		ctrl_state.z_vel = _cmd.param7;
+
 		// publish control state data
 		if (_control_state_pub == nullptr) {
 			_control_state_pub = orb_advertise(ORB_ID(control_state), &ctrl_state);
