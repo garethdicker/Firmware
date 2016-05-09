@@ -82,6 +82,7 @@
 #include <uORB/topics/parameter_update.h>
 #include <uORB/topics/multirotor_motor_limits.h>
 #include <uORB/topics/mc_att_ctrl_status.h>
+#include <uORB/topics/sensor_accel.h>
 #include <systemlib/param/param.h>
 #include <systemlib/err.h>
 #include <systemlib/perf_counter.h>
@@ -138,6 +139,7 @@ private:
 	int		_armed_sub;				/**< arming status subscription */
 	int		_vehicle_status_sub;	/**< vehicle status subscription */
 	int 	_motor_limits_sub;		/**< motor limits subscription */
+	int 	_sensor_accel_sub;
 
 	orb_advert_t	_v_rates_sp_pub;		/**< rate setpoint publication */
 	orb_advert_t	_actuators_0_pub;		/**< attitude actuator controls publication */
@@ -158,6 +160,7 @@ private:
 	struct vehicle_status_s				_vehicle_status;	/**< vehicle status */
 	struct multirotor_motor_limits_s	_motor_limits;		/**< motor limits */
 	struct mc_att_ctrl_status_s 		_controller_status; /**< controller status */
+	struct sensor_accel_s               _sensor_accel;
 
 	perf_counter_t	_loop_perf;			/**< loop performance counter */
 	perf_counter_t	_controller_latency_perf;
@@ -170,6 +173,8 @@ private:
 	math::Vector<3>		_att_control;	/**< attitude control vector */
 
 	math::Matrix<3, 3>  _I;				/**< identity matrix */
+
+	int thrown;
 
 	struct {
 		param_t roll_p;
@@ -284,6 +289,11 @@ private:
 	 */
 	void		vehicle_motor_limits_poll();
 
+	
+
+	void 		sensor_accel_poll();
+
+
 	/**
 	 * Shim for calling task_main from task_create.
 	 */
@@ -314,6 +324,7 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 	_manual_control_sp_sub(-1),
 	_armed_sub(-1),
 	_vehicle_status_sub(-1),
+	_sensor_accel_sub(-1),
 
 	/* publications */
 	_v_rates_sp_pub(nullptr),
@@ -340,6 +351,7 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 	memset(&_vehicle_status, 0, sizeof(_vehicle_status));
 	memset(&_motor_limits, 0, sizeof(_motor_limits));
 	memset(&_controller_status, 0, sizeof(_controller_status));
+	memset(&_sensor_accel, 0, sizeof(_sensor_accel));
 	_vehicle_status.is_rotary_wing = true;
 
 	_params.att_p.zero();
@@ -367,6 +379,8 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 	_att_control.zero();
 
 	_I.identity();
+
+	thrown = 0;
 
 	_params_handles.roll_p			= 	param_find("MC_ROLL_P");
 	_params_handles.roll_rate_p		= 	param_find("MC_ROLLRATE_P");
@@ -637,6 +651,18 @@ MulticopterAttitudeControl::vehicle_motor_limits_poll()
 
 	if (updated) {
 		orb_copy(ORB_ID(multirotor_motor_limits), _motor_limits_sub, &_motor_limits);
+		//printf("motor limits: %d  %d  %d  %d\n", _motor_limits(0),_motor_limits(1),_motor_limits(2),_motor_limits(3));
+	}
+}
+
+void
+MulticopterAttitudeControl::sensor_accel_poll()
+{
+	bool updated;
+	orb_check(_sensor_accel_sub, &updated);
+
+	if (updated){
+		orb_copy(ORB_ID(sensor_accel), _sensor_accel_sub, &_sensor_accel);
 	}
 }
 
@@ -650,110 +676,127 @@ MulticopterAttitudeControl::control_attitude(float dt)
 {
 	vehicle_attitude_setpoint_poll();
 
-	_thrust_sp = _v_att_sp.thrust;
-
-	/* construct attitude setpoint rotation matrix */
-	math::Matrix<3, 3> R_sp;
-	R_sp.set(_v_att_sp.R_body);
-
-	/* get current rotation matrix from control state quaternions */
-	math::Quaternion q_att(_ctrl_state.q[0], _ctrl_state.q[1], _ctrl_state.q[2], _ctrl_state.q[3]);
-	math::Matrix<3, 3> R = q_att.to_dcm();
-
-	/* all input data is ready, run controller itself */
-
-	/* try to move thrust vector shortest way, because yaw response is slower than roll/pitch */
-	math::Vector<3> R_z(R(0, 2), R(1, 2), R(2, 2));
-	math::Vector<3> R_sp_z(R_sp(0, 2), R_sp(1, 2), R_sp(2, 2));
-
-	/* axis and sin(angle) of desired rotation */
-	math::Vector<3> e_R = R.transposed() * (R_z % R_sp_z);
-
-	/* calculate angle error */
-	float e_R_z_sin = e_R.length();
-	float e_R_z_cos = R_z * R_sp_z;
-
-	/* calculate weight for yaw control */
-	float yaw_w = R_sp(2, 2) * R_sp(2, 2);
-
-	/* calculate rotation matrix after roll/pitch only rotation */
-	math::Matrix<3, 3> R_rp;
-
-	if (e_R_z_sin > 0.0f) {
-		/* get axis-angle representation */
-		float e_R_z_angle = atan2f(e_R_z_sin, e_R_z_cos);
-		math::Vector<3> e_R_z_axis = e_R / e_R_z_sin;
-
-		e_R = e_R_z_axis * e_R_z_angle;
-
-		/* cross product matrix for e_R_axis */
-		math::Matrix<3, 3> e_R_cp;
-		e_R_cp.zero();
-		e_R_cp(0, 1) = -e_R_z_axis(2);
-		e_R_cp(0, 2) = e_R_z_axis(1);
-		e_R_cp(1, 0) = e_R_z_axis(2);
-		e_R_cp(1, 2) = -e_R_z_axis(0);
-		e_R_cp(2, 0) = -e_R_z_axis(1);
-		e_R_cp(2, 1) = e_R_z_axis(0);
-
-		/* rotation matrix for roll/pitch only rotation */
-		R_rp = R * (_I + e_R_cp * e_R_z_sin + e_R_cp * e_R_cp * (1.0f - e_R_z_cos));
-
-	} else {
-		/* zero roll/pitch rotation */
-		R_rp = R;
+	// Free fall detection
+	math::Vector<3> accel(_sensor_accel.x, _sensor_accel.y, _sensor_accel.z);
+	//if disarmed, reset freefall flag
+	if (!_armed.armed) {
+		thrown = 0;
 	}
-
-	/* R_rp and R_sp has the same Z axis, calculate yaw error */
-	math::Vector<3> R_sp_x(R_sp(0, 0), R_sp(1, 0), R_sp(2, 0));
-	math::Vector<3> R_rp_x(R_rp(0, 0), R_rp(1, 0), R_rp(2, 0));
-	e_R(2) = atan2f((R_rp_x % R_sp_x) * R_sp_z, R_rp_x * R_sp_x) * yaw_w;
-
-	if (e_R_z_cos < 0.0f) {
-		/* for large thrust vector rotations use another rotation method:
-		 * calculate angle and axis for R -> R_sp rotation directly */
-		math::Quaternion q;
-		q.from_dcm(R.transposed() * R_sp);
-		math::Vector<3> e_R_d = q.imag();
-		e_R_d.normalize();
-		e_R_d *= 2.0f * atan2f(e_R_d.length(), q(0));
-
-		/* use fusion of Z axis based rotation and direct rotation */
-		float direct_w = e_R_z_cos * e_R_z_cos * yaw_w;
-		e_R = e_R * (1.0f - direct_w) + e_R_d * direct_w;
+	//check for freefall
+	if (accel.length() < 3.5f){
+		thrown = 1;
 	}
+	//only apply thrust if freefall has been detected
+	if(thrown == 1){
+		_thrust_sp = _v_att_sp.thrust;
 
-	/* calculate angular rates setpoint */
-	_rates_sp = _params.att_p.emult(e_R);
+		//RECOVERY CONTROL
+		if(false){
+			math::Vector<3> a_des(0.0f, 0.0f, 9.81f);
+			math::Quaternion q_att(_ctrl_state.q[0], _ctrl_state.q[1], _ctrl_state.q[2], _ctrl_state.q[3]);
+			math::Quaternion zAxisAppended(0.0f, 0.0f, 0.0f, 1.0f);
+			math::Quaternion bodyZAppended = ((q_att * zAxisAppended) * q_att.inversed());
+			math::Vector<3> bodyZ(bodyZAppended(1), bodyZAppended(2), bodyZAppended(3));
+			math::Vector<3> bodyZDesired = a_des.normalized();
+			// equation (11)
+			float alpha = acosf(bodyZ(0)*bodyZDesired(0) + bodyZ(1)*bodyZDesired(1) + bodyZ(2)*bodyZDesired(2));	
+			//compute axis of rotation in world frame
+		    math::Vector<3> n(bodyZ(1)*bodyZDesired(2) - bodyZ(2)*bodyZDesired(1), \
+						      bodyZ(2)*bodyZDesired(0) - bodyZ(0)*bodyZDesired(2), \
+						      bodyZ(0)*bodyZDesired(1) - bodyZ(1)*bodyZDesired(0));
+		    //to be safe
+		    n.normalize();
+		    //rotate into body frame
+		    math::Quaternion nAppended(0.0f, n(0), n(1), n(2));
+		    math::Quaternion nBodyAppended = ((q_att.inversed() * nAppended) * q_att);
+		    math::Vector<3>  nBody(nBodyAppended(1), nBodyAppended(2),nBodyAppended(3));
+		    // compute roll pitch error quaternion
+			math::Quaternion q_error_rp(cosf(alpha/2), nBody(0)*sinf(alpha/2), \
+		    							nBody(1)*sinf(alpha/2), nBody(2)*sinf(alpha/2));
 
-	/* limit rates */
-	for (int i = 0; i < 3; i++) {
-		if (_v_control_mode.flag_control_velocity_enabled && !_v_control_mode.flag_control_manual_enabled) {
-			_rates_sp(i) = math::constrain(_rates_sp(i), -_params.auto_rate_max(i), _params.auto_rate_max(i));
-		} else {
-			_rates_sp(i) = math::constrain(_rates_sp(i), -_params.mc_rate_max(i), _params.mc_rate_max(i));
+			float ERROR_TO_BODYRATES = _params.rate_ff(2); 
+
+			float body_p_des = ERROR_TO_BODYRATES * q_error_rp(1);
+			//is the negative 1 here needed due to orientation conventions? we are in NED here
+			float body_q_des = ERROR_TO_BODYRATES * q_error_rp(2);
+			//check if yawed to other side?
+			if (q_error_rp(0) < 0.0f){
+		    	body_p_des = -1*body_p_des;
+		    	body_q_des = -1*body_q_des;
+		    }
+			float body_r_des = 0.0f;
+			math::Vector<3> rates(body_p_des, body_q_des, body_r_des);
+			_rates_sp = rates;
+		}
+
+		//ALTITUDE CONTROL
+		else{
+			math::Matrix<3, 3> R_sp;
+			R_sp.set(_v_att_sp.R_body);
+			/* get current rotation matrix from control state quaternions */
+			math::Quaternion q_att(_ctrl_state.q[0], _ctrl_state.q[1], _ctrl_state.q[2], _ctrl_state.q[3]);
+			math::Matrix<3, 3> R = q_att.to_dcm();
+			/* try to move thrust vector shortest way, because yaw response is slower than roll/pitch */
+			math::Vector<3> R_z(R(0, 2), R(1, 2), R(2, 2));
+			math::Vector<3> R_sp_z(R_sp(0, 2), R_sp(1, 2), R_sp(2, 2));
+			/* axis and sin(angle) of desired rotation */
+			math::Vector<3> e_R = R.transposed() * (R_z % R_sp_z);
+			/* calculate angle error */
+			float e_R_z_sin = e_R.length();
+			float e_R_z_cos = R_z * R_sp_z;
+			/* calculate weight for yaw control */
+			float yaw_w = R_sp(2, 2) * R_sp(2, 2);
+			/* calculate rotation matrix after roll/pitch only rotation */
+			math::Matrix<3, 3> R_rp;
+			if (e_R_z_sin > 0.0f) {
+				/* get axis-angle representation */
+				float e_R_z_angle = atan2f(e_R_z_sin, e_R_z_cos);
+				math::Vector<3> e_R_z_axis = e_R / e_R_z_sin;
+				e_R = e_R_z_axis * e_R_z_angle;
+				/* cross product matrix for e_R_axis */
+				math::Matrix<3, 3> e_R_cp;
+				e_R_cp.zero();
+				e_R_cp(0, 1) = -e_R_z_axis(2);
+				e_R_cp(0, 2) = e_R_z_axis(1);
+				e_R_cp(1, 0) = e_R_z_axis(2);
+				e_R_cp(1, 2) = -e_R_z_axis(0);
+				e_R_cp(2, 0) = -e_R_z_axis(1);
+				e_R_cp(2, 1) = e_R_z_axis(0);
+				/* rotation matrix for roll/pitch only rotation */
+				R_rp = R * (_I + e_R_cp * e_R_z_sin + e_R_cp * e_R_cp * (1.0f - e_R_z_cos));
+			} else {
+				/* zero roll/pitch rotation */
+				R_rp = R;
+			}
+			/* R_rp and R_sp has the same Z axis, calculate yaw error */
+			math::Vector<3> R_sp_x(R_sp(0, 0), R_sp(1, 0), R_sp(2, 0));
+			math::Vector<3> R_rp_x(R_rp(0, 0), R_rp(1, 0), R_rp(2, 0));
+			e_R(2) = atan2f((R_rp_x % R_sp_x) * R_sp_z, R_rp_x * R_sp_x) * yaw_w;
+			if (e_R_z_cos < 0.0f) {
+				/* for large thrust vector rotations use another rotation method:
+				 * calculate angle and axis for R -> R_sp rotation directly */
+				math::Quaternion q_error;
+				q_error.from_dcm(R.transposed() * R_sp);
+				math::Vector<3> e_R_d = q_error(0) >= 0.0f ? q_error.imag()  * 2.0f: -q_error.imag() * 2.0f;
+				/* use fusion of Z axis based rotation and direct rotation */
+				float direct_w = e_R_z_cos * e_R_z_cos * yaw_w;
+				e_R = e_R * (1.0f - direct_w) + e_R_d * direct_w;
+			}
+			/* calculate angular rates setpoint */
+			_rates_sp = _params.att_p.emult(e_R);
+			/* limit rates */
+			for (int i = 0; i < 3; i++) {
+				if (_v_control_mode.flag_control_velocity_enabled && !_v_control_mode.flag_control_manual_enabled) {
+					_rates_sp(i) = math::constrain(_rates_sp(i), -_params.auto_rate_max(i), _params.auto_rate_max(i));
+				} else {
+					_rates_sp(i) = math::constrain(_rates_sp(i), -_params.mc_rate_max(i), _params.mc_rate_max(i));
+				}
+			}
 		}
 	}
-
-	/* weather-vane mode, dampen yaw rate */
-	if (_v_att_sp.disable_mc_yaw_control == true && _v_control_mode.flag_control_velocity_enabled && !_v_control_mode.flag_control_manual_enabled) {
-		float wv_yaw_rate_max = _params.auto_rate_max(2) * _params.vtol_wv_yaw_rate_scale;
-		_rates_sp(2) = math::constrain(_rates_sp(2), -wv_yaw_rate_max, wv_yaw_rate_max);
-		// prevent integrator winding up in weathervane mode
-		_rates_int(2) = 0.0f;
+	else {
+		_thrust_sp = 0.05f;
 	}
-
-	/* feed forward yaw setpoint rate */
-	_rates_sp(2) += _v_att_sp.yaw_sp_move_rate * yaw_w * _params.yaw_ff;
-
-	/* weather-vane mode, scale down yaw rate */
-	if (_v_att_sp.disable_mc_yaw_control == true && _v_control_mode.flag_control_velocity_enabled && !_v_control_mode.flag_control_manual_enabled) {
-		float wv_yaw_rate_max = _params.auto_rate_max(2) * _params.vtol_wv_yaw_rate_scale;
-		_rates_sp(2) = math::constrain(_rates_sp(2), -wv_yaw_rate_max, wv_yaw_rate_max);
-		// prevent integrator winding up in weathervane mode
-		_rates_int(2) = 0.0f;
-	}
-
 }
 
 /*
@@ -764,35 +807,60 @@ MulticopterAttitudeControl::control_attitude(float dt)
 void
 MulticopterAttitudeControl::control_attitude_rates(float dt)
 {
-	/* reset integral if disarmed */
-	if (!_armed.armed || !_vehicle_status.is_rotary_wing) {
-		_rates_int.zero();
-	}
-
 	/* current body angular rates */
 	math::Vector<3> rates;
 	rates(0) = _ctrl_state.roll_rate;
 	rates(1) = _ctrl_state.pitch_rate;
 	rates(2) = _ctrl_state.yaw_rate;
-
 	/* angular rates error */
 	math::Vector<3> rates_err = _rates_sp - rates;
-	_att_control = _params.rate_p.emult(rates_err) + _params.rate_d.emult(_rates_prev - rates) / dt + _rates_int;// + _params.rate_ff.emult(_rates_sp - _rates_sp_prev) / dt;
-	_rates_sp_prev = _rates_sp;
-	_rates_prev = rates;
 
-	/* update integral only if not saturated on low limit and if motor commands are not saturated */
-	if (_thrust_sp > MIN_TAKEOFF_THRUST && !_motor_limits.lower_limit && !_motor_limits.upper_limit) {
-		for (int i = 0; i < 3; i++) {
-			if (fabsf(_att_control(i)) < _thrust_sp) {
-				float rate_i = _rates_int(i) + _params.rate_i(i) * rates_err(i) * dt;
+	if (!_armed.armed) {
+		thrown = 0;
+	}
+	//check for freefall
+	math::Vector<3> accel(_sensor_accel.x, _sensor_accel.y, _sensor_accel.z);
+	if (accel.length() < 3.5f){
+		thrown = 1;
+	}
 
-				if (PX4_ISFINITE(rate_i) && rate_i > -RATES_I_LIMIT && rate_i < RATES_I_LIMIT &&
-				    _att_control(i) > -RATES_I_LIMIT && _att_control(i) < RATES_I_LIMIT) {
-					_rates_int(i) = rate_i;
+	if (thrown == 1){
+		//RECOVERY CONTROL RATES
+		if(false){
+			math::Vector<3> p_gains(_params.rate_ff(1), _params.rate_ff(1), _params.rate_p(2));
+			math::Vector<3> d_gains(_params.rate_ff(0), _params.rate_ff(0), _params.rate_d(2));
+
+			_att_control = p_gains.emult(rates_err) + d_gains.emult(_rates_prev - rates) / dt;
+			_rates_sp_prev = _rates_sp;
+			_rates_prev = rates;
+		}
+
+		//ALTITUDE CONTROL RATES
+		else{
+			if(_vehicle_status.is_rotary_wing) {
+				_rates_int.zero();
+			}
+			_att_control = _params.rate_p.emult(rates_err) + _params.rate_d.emult(_rates_prev - rates) / dt + _rates_int;
+			_rates_sp_prev = _rates_sp;
+			_rates_prev = rates;
+			/* update integral only if not saturated on low limit and if motor commands are not saturated */
+			if (_thrust_sp > MIN_TAKEOFF_THRUST && !_motor_limits.lower_limit && !_motor_limits.upper_limit) {
+				for (int i = 0; i < 3; i++) {
+					if (fabsf(_att_control(i)) < _thrust_sp) {
+						float rate_i = _rates_int(i) + _params.rate_i(i) * rates_err(i) * dt;
+
+						if (PX4_ISFINITE(rate_i) && rate_i > -RATES_I_LIMIT && rate_i < RATES_I_LIMIT &&
+						    _att_control(i) > -RATES_I_LIMIT && _att_control(i) < RATES_I_LIMIT) {
+							_rates_int(i) = rate_i;
+						}
+					}
 				}
 			}
 		}
+	//only perform attitude control once freefall has been detected
+	}
+	else{
+		_att_control.zero();
 	}
 }
 
@@ -818,6 +886,7 @@ MulticopterAttitudeControl::task_main()
 	_armed_sub = orb_subscribe(ORB_ID(actuator_armed));
 	_vehicle_status_sub = orb_subscribe(ORB_ID(vehicle_status));
 	_motor_limits_sub = orb_subscribe(ORB_ID(multirotor_motor_limits));
+	_sensor_accel_sub = orb_subscribe(ORB_ID(sensor_accel));
 
 	/* initialize parameters cache */
 	parameters_update();
@@ -872,6 +941,7 @@ MulticopterAttitudeControl::task_main()
 			vehicle_manual_poll();
 			vehicle_status_poll();
 			vehicle_motor_limits_poll();
+			sensor_accel_poll();
 
 			/* Check if we are in rattitude mode and the pilot is above the threshold on pitch
 			 * or roll (yaw can rotate 360 in normal att control).  If both are true don't
@@ -970,7 +1040,6 @@ MulticopterAttitudeControl::task_main()
 
 				if (!_actuators_0_circuit_breaker_enabled) {
 					if (_actuators_0_pub != nullptr) {
-
 						orb_publish(_actuators_id, _actuators_0_pub, &_actuators);
 						perf_end(_controller_latency_perf);
 
