@@ -1,3 +1,4 @@
+
 /****************************************************************************
  *
  *   Copyright (c) 2013-2015 PX4 Development Team. All rights reserved.
@@ -175,6 +176,7 @@ private:
 	math::Matrix<3, 3>  _I;				/**< identity matrix */
 
 	int thrown;
+	int recovery_stage;
 
 	struct {
 		param_t roll_p;
@@ -381,6 +383,7 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 	_I.identity();
 
 	thrown = 0;
+	recovery_stage = 0;
 
 	_params_handles.roll_p			= 	param_find("MC_ROLL_P");
 	_params_handles.roll_rate_p		= 	param_find("MC_ROLLRATE_P");
@@ -675,22 +678,38 @@ MulticopterAttitudeControl::control_attitude(float dt)
 {
 	vehicle_attitude_setpoint_poll();
 
-	// Free fall detection
-	math::Vector<3> accel(_sensor_accel.x, _sensor_accel.y, _sensor_accel.z);
 	//if disarmed, reset freefall flag
 	if (!_armed.armed) {
 		thrown = 0;
+		recovery_stage = 0;
 	}
 	//check for freefall
+	math::Vector<3> accel(_sensor_accel.x, _sensor_accel.y, _sensor_accel.z);
 	if (accel.length() < 3.5f){
 		thrown = 1;
 	}
 	//only apply thrust if freefall has been detected
 	if(thrown == 1){
+
+//////////////////////////////////////////////////////
+//                 RECOVERY CONTORL                 //
+//////////////////////////////////////////////////////
+
 		_thrust_sp = _v_att_sp.thrust;
 
-		//RECOVERY CONTROL
-		if(false){
+		math::Quaternion q_att(_ctrl_state.q[0], _ctrl_state.q[1], _ctrl_state.q[2], _ctrl_state.q[3]);
+		math::Vector<3> euler_angles = q_att.to_euler();
+		
+		math::Vector<3> rates;
+		rates(0) = _ctrl_state.roll_rate;
+		rates(1) = _ctrl_state.pitch_rate;
+		rates(2) = _ctrl_state.yaw_rate;
+
+		if(fabs(euler_angles(0)) < 0.2 && fabs(euler_angles(1)) < 0.2 && fabs(rates(0)) < 0.2 && fabs(rates(1)) < 0.2 && fabs(rates(2)) < 0.2){
+			recovery_stage = 1;
+		}
+
+		if (recovery_stage == 0){
 			math::Vector<3> a_des(0.0f, 0.0f, 9.81f);
 			math::Quaternion q_att(_ctrl_state.q[0], _ctrl_state.q[1], _ctrl_state.q[2], _ctrl_state.q[3]);
 			math::Quaternion zAxisAppended(0.0f, 0.0f, 0.0f, 1.0f);
@@ -712,11 +731,9 @@ MulticopterAttitudeControl::control_attitude(float dt)
 		    // compute roll pitch error quaternion
 			math::Quaternion q_error_rp(cosf(alpha/2), nBody(0)*sinf(alpha/2), \
 		    							nBody(1)*sinf(alpha/2), nBody(2)*sinf(alpha/2));
-
+			//proportional constant for aggressiveness of recovery
 			float ERROR_TO_BODYRATES = _params.rate_ff(2); 
-
 			float body_p_des = ERROR_TO_BODYRATES * q_error_rp(1);
-			//is the negative 1 here needed due to orientation conventions? we are in NED here
 			float body_q_des = ERROR_TO_BODYRATES * q_error_rp(2);
 			//check if yawed to other side?
 			if (q_error_rp(0) < 0.0f){
@@ -728,8 +745,11 @@ MulticopterAttitudeControl::control_attitude(float dt)
 			_rates_sp = rates;
 		}
 
-		//ALTITUDE CONTROL
-		else{
+//////////////////////////////////////////////////////
+//                  ALTITUDE CONTROL                //
+//////////////////////////////////////////////////////
+
+		else if (recovery_stage == 1){
 			math::Matrix<3, 3> R_sp;
 			R_sp.set(_v_att_sp.R_body);
 			/* get current rotation matrix from control state quaternions */
@@ -792,6 +812,10 @@ MulticopterAttitudeControl::control_attitude(float dt)
 				}
 			}
 		}
+		else{
+			PX4_WARN("INVALID RECOVERY STAGE!\n");
+			_thrust_sp = 0.05f;
+		}
 	}
 	else {
 		_thrust_sp = 0.05f;
@@ -806,39 +830,64 @@ MulticopterAttitudeControl::control_attitude(float dt)
 void
 MulticopterAttitudeControl::control_attitude_rates(float dt)
 {
-	/* current body angular rates */
-	math::Vector<3> rates;
-	rates(0) = _ctrl_state.roll_rate;
-	rates(1) = _ctrl_state.pitch_rate;
-	rates(2) = _ctrl_state.yaw_rate;
-	/* angular rates error */
-	math::Vector<3> rates_err = _rates_sp - rates;
-
-	if (!_armed.armed) {
+	//if disarmed, reset freefall flag
+	if (!_armed.armed){
 		thrown = 0;
+		recovery_stage = 0;
 	}
 	//check for freefall
 	math::Vector<3> accel(_sensor_accel.x, _sensor_accel.y, _sensor_accel.z);
 	if (accel.length() < 3.5f){
 		thrown = 1;
 	}
-
+	// upon freefall
 	if (thrown == 1){
-		//RECOVERY CONTROL RATES
-		if(false){
-			math::Vector<3> p_gains(_params.rate_ff(1), _params.rate_ff(1), _params.rate_p(2));
-			math::Vector<3> d_gains(_params.rate_ff(0), _params.rate_ff(0), _params.rate_d(2));
 
+		math::Vector<3> rates;
+		rates(0) = _ctrl_state.roll_rate;
+		rates(1) = _ctrl_state.pitch_rate;
+		rates(2) = _ctrl_state.yaw_rate;
+		math::Vector<3> rates_err = _rates_sp - rates;
+
+//////////////////////////////////////////////////////
+//                 RECOVERY CONTORL                 //
+//////////////////////////////////////////////////////
+
+		//Check recovery stage
+		math::Quaternion q_att(_ctrl_state.q[0], _ctrl_state.q[1], _ctrl_state.q[2], _ctrl_state.q[3]);
+		math::Vector<3> euler_angles = q_att.to_euler();
+
+		if(fabs(euler_angles(0)) < 0.2 && fabs(euler_angles(1)) < 0.2 && fabs(rates(0)) < 0.2 && fabs(rates(1)) < 0.2 && fabs(rates(2)) < 0.2){
+			recovery_stage = 1;
+		}
+
+		//PX4_INFO("recovery stage, roll, pitch: %d   %.4f  %.4f\n", recovery_stage, fabs(rates(0)), fabs(rates(1)));
+
+
+		if (recovery_stage == 0){
+			/* current body angular rates */
+
+//THESE GAINS HAVE BEEN OVERRIDDEN TO MAKE A NEW PARAMETER AVAILABLE
+			math::Vector<3> p_gains(_params.rate_p(0), _params.rate_p(0), _params.rate_p(2));
+			math::Vector<3> d_gains(_params.rate_ff(0), _params.rate_ff(0), _params.rate_d(2));
+			//perform PD control on body rates
 			_att_control = p_gains.emult(rates_err) + d_gains.emult(_rates_prev - rates) / dt;
+			//update previous rates and setpoints
 			_rates_sp_prev = _rates_sp;
 			_rates_prev = rates;
 		}
 
-		//ALTITUDE CONTROL RATES
-		else{
-			if(_vehicle_status.is_rotary_wing) {
+//////////////////////////////////////////////////////
+//            SWITCH TO ALTITUDE CONTROL            //
+//////////////////////////////////////////////////////
+
+		else if (recovery_stage == 1){
+			/* reset integral if disarmed */
+			if (!_armed.armed || !_vehicle_status.is_rotary_wing) {
 				_rates_int.zero();
 			}
+
+			math::Vector<3> rates_err = _rates_sp - rates;
 			_att_control = _params.rate_p.emult(rates_err) + _params.rate_d.emult(_rates_prev - rates) / dt + _rates_int;
 			_rates_sp_prev = _rates_sp;
 			_rates_prev = rates;
@@ -856,8 +905,12 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 				}
 			}
 		}
-	//only perform attitude control once freefall has been detected
+		else{
+			PX4_WARN("INVALID RECOVERY STAGE!\n");
+			_att_control.zero();
+		}
 	}
+	//only perform attitude control once freefall has been detected
 	else{
 		_att_control.zero();
 	}
@@ -885,7 +938,9 @@ MulticopterAttitudeControl::task_main()
 	_armed_sub = orb_subscribe(ORB_ID(actuator_armed));
 	_vehicle_status_sub = orb_subscribe(ORB_ID(vehicle_status));
 	_motor_limits_sub = orb_subscribe(ORB_ID(multirotor_motor_limits));
-	_sensor_accel_sub = orb_subscribe(ORB_ID(sensor_accel));
+
+    _sensor_accel_sub = orb_subscribe(ORB_ID(sensor_accel));
+
 
 	/* initialize parameters cache */
 	parameters_update();
@@ -940,7 +995,8 @@ MulticopterAttitudeControl::task_main()
 			vehicle_manual_poll();
 			vehicle_status_poll();
 			vehicle_motor_limits_poll();
-			sensor_accel_poll();
+            sensor_accel_poll();
+
 
 			/* Check if we are in rattitude mode and the pilot is above the threshold on pitch
 			 * or roll (yaw can rotate 360 in normal att control).  If both are true don't
@@ -1039,6 +1095,7 @@ MulticopterAttitudeControl::task_main()
 
 				if (!_actuators_0_circuit_breaker_enabled) {
 					if (_actuators_0_pub != nullptr) {
+
 						orb_publish(_actuators_id, _actuators_0_pub, &_actuators);
 						perf_end(_controller_latency_perf);
 

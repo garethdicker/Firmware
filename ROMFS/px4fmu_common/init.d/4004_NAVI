@@ -1,0 +1,46 @@
+#!nsh
+#
+# @name NAVI
+#
+# @type Quadrotor x
+#
+# @maintainer Sebastian Schell <sebastian.schell@mail.mcgill.ca>
+#
+
+echo "Launching NAVI configuration..."
+
+
+###### Choose distance sensor driver to run (trone or mb12xx):  #######
+
+set DistanceSensor trone
+echo "Sensor driver $DistanceSensor chosen"
+
+#######################################################################
+
+
+sh /etc/init.d/rc.mc_defaults
+
+
+# Set parameters
+if [ $AUTOCNF == yes ]
+then
+	param set INAV_LIDAR_EST 1			# enable distance sensor for altitude estimator
+	param set MPC_THR_HOVER 22			# hover thrust to 22%
+	param set RC_MAP_KILL_SW 7			# map kill switch to rc channel 7
+	param set RC_KILLSWITCH_TH -0.5			# adjust kill switch threshold. Negative for inversion
+	param set SYS_COMPANION 921600		
+fi
+
+set MIXER quad_x
+set PWM_OUT 1234
+
+echo "Parameters set"
+
+# wait for a few seconds
+sleep 3
+
+echo "starting sensor driver..."
+
+$DistanceSensor start
+
+echo "sensor driver start successful"
