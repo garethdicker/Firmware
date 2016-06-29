@@ -685,7 +685,7 @@ MulticopterAttitudeControl::control_attitude(float dt)
 	}
 	//check for freefall
 	math::Vector<3> accel(_sensor_accel.x, _sensor_accel.y, _sensor_accel.z);
-	if (accel.length() < 3.5f){
+	if (accel.length() < 5.0f){
 		thrown = 1;
 	}
 	//only apply thrust if freefall has been detected
@@ -837,7 +837,7 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 	}
 	//check for freefall
 	math::Vector<3> accel(_sensor_accel.x, _sensor_accel.y, _sensor_accel.z);
-	if (accel.length() < 3.5f){
+	if (accel.length() < 5.0f){
 		thrown = 1;
 	}
 	// upon freefall
