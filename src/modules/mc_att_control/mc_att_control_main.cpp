@@ -665,7 +665,7 @@ MulticopterAttitudeControl::control_attitude(float dt)
 
 	float vert_vel_err = z_vel_sp - z_vel;
 
-	float vert_vel_p_gain = 5.0f;
+	float vert_vel_p_gain = 0.5f;
 
 	//inputs to control
 	math::Vector<3> a_des(0.0f, 0.0f, 9.81f);
@@ -679,9 +679,17 @@ MulticopterAttitudeControl::control_attitude(float dt)
 	math::Vector<3> bodyZDesired = a_des.normalized();
 
 	// equation (9)
-	float c_des = bodyZ(0)*a_des(0) + bodyZ(1)*a_des(1) + bodyZ(2)*a_des(2);	
-	_thrust_sp = (c_des + 9.81f) / (4.0f*9.81f);
-	_thrust_sp = 0.5f + vert_vel_p_gain * vert_vel_err;
+	//float c_des = bodyZ(0)*a_des(0) + bodyZ(1)*a_des(1) + bodyZ(2)*a_des(2);	
+	//_thrust_sp = (c_des + 9.81f) / (4.0f*9.81f);
+
+	_thrust_sp = 0.22f;
+
+	math::Quaternion stability_check(q_att(1), q_att(2), _ctrl_state.roll_rate, _ctrl_state.pitch_rate);
+	
+	if (stability_check(0) < 0.2f && stability_check(1) < 0.2f && stability_check(2) < 0.18f && stability_check(3) < 0.18f){
+		_thrust_sp = 0.22f + vert_vel_p_gain * vert_vel_err;
+		//flag = 1;
+	}
 	// equation (11)
 	float alpha = acosf(bodyZ(0)*bodyZDesired(0) + bodyZ(1)*bodyZDesired(1) + bodyZ(2)*bodyZDesired(2));	
 
@@ -702,20 +710,14 @@ MulticopterAttitudeControl::control_attitude(float dt)
     							nBody(1)*sinf(alpha/2), nBody(2)*sinf(alpha/2));
 
 
-	const float ERROR_TO_BODYRATES = 20.0f; 
+	const float ERROR_TO_BODYRATES = 12.0f; 
 
 	float body_p_des = ERROR_TO_BODYRATES * q_error_rp(1);
 
 	//is the negative 1 here needed due to orientation conventions? we are in NED here
-	float body_q_des = -1* ERROR_TO_BODYRATES * q_error_rp(2);
+	float body_q_des = -1*ERROR_TO_BODYRATES * q_error_rp(2);
 
-	double x = (double)z_vel;
-	double y = (double)vert_vel_err;
-	double z = (double)_thrust_sp;
-
-	printf("quaternion is %f   %f  %f  \n", x, y, z);
-
-//check if yawed to other side
+	//check if yawed to other side
 	if (q_error_rp(0) < 0.0f){
     	body_p_des = -1*body_p_des;
     	body_q_des = -1*body_q_des;
@@ -726,6 +728,12 @@ MulticopterAttitudeControl::control_attitude(float dt)
 	math::Vector<3> rates(body_p_des, body_q_des, body_r_des);
 
 	_rates_sp = rates;
+
+	//debug
+	//double x = (double)_thrust_sp;
+	//double y = (double)vert_vel_err;
+	//int z = flag;
+	//printf("debug: %f   %f  %d  \n", x, y, z);
 
 }
 

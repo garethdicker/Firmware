@@ -2,8 +2,10 @@ uorb start
 simulator start -s
 param load
 param set MAV_TYPE 2
-param set MC_PITCHRATE_P 0.6
-param set MC_ROLLRATE_P 0.6
+param set MC_PITCHRATE_P 0.5
+param set MC_ROLLRATE_P 0.5
+param set MC_ROLLRATE_D 0.015
+param set MC_PITCHRATE_D 0.015
 param set MC_YAW_P 2.0
 param set MC_YAWRATE_P 0.35
 param set SYS_AUTOSTART 4010
@@ -59,10 +61,16 @@ mavlink stream -r 80 -s GLOBAL_POSITION_INT -u 14556
 mavlink stream -r 80 -s ATTITUDE -u 14556
 mavlink stream -r 200 -s ATTITUDE_QUATERNION -u 14556
 mavlink stream -r 80 -s QUATERNION -u 14556
-mavlink stream -r 80 -s VEHICLE_COMMAND -u 14556
+mavlink stream -r 80 -s COMMAND_LONG -u 14556
+mavlink stream -r 80 -s DISTANCE_SENSOR -u 14556
+mavlink stream -r 80 -s SERVO_OUTPUT_RAW -u 14556
+mavlink stream -r 200 -s ACTUATOR_CONTROL_TARGET0 -u 14556
 mavlink stream -r 80 -s ATTITUDE_TARGET -u 14556
+mavlink stream -r 80 -s MANUAL_CONTROL -u 14556
 mavlink stream -r 20 -s RC_CHANNELS -u 14556
 mavlink stream -r 250 -s HIGHRES_IMU -u 14556
 mavlink stream -r 10 -s OPTICAL_FLOW_RAD -u 14556
+mavlink stream -r 10 -s NAMED_VALUE_FLOAT -u 14556
+mavlink stream -r 10 -s VISION_POSITION_ESTIMATE -u 14556
 mavlink boot_complete
 sdlog2 start -r 100 -e -t -a

@@ -15,7 +15,7 @@ uint8 MAIN_STATE_MAX = 12
 
 # If you change the order, add or remove arming_state_t states make sure to update the arrays
 # in state_machine_helper.cpp as well.
-uint8 ARMING_STATE_INIT = 0
+uint8 ARMING_cd STATE_INIT = 0
 uint8 ARMING_STATE_STANDBY = 1
 uint8 ARMING_STATE_ARMED = 2
 uint8 ARMING_STATE_ARMED_ERROR = 3
